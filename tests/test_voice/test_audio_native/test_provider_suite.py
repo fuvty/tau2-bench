@@ -133,8 +133,8 @@ MAX_RESPONSE_TICKS = 75  # 15 seconds at 200ms ticks
 # Speech audio samples of different lengths. Some provider VADs require a
 # minimum speech duration to trigger (e.g., xAI needs ~1s).
 SPEECH_AUDIO = [
-    pytest.param("hello.wav", id="short-720ms"),
-    pytest.param("hi_how_are_you.wav", id="medium-1120ms"),
+    pytest.param("hello.ulaw", id="short-720ms"),
+    pytest.param("hi_how_are_you.ulaw", id="medium-1120ms"),
 ]
 
 
@@ -146,11 +146,10 @@ SPEECH_AUDIO = [
 def load_telephony_audio(filename: str) -> bytes:
     """Load a pre-converted telephony audio file (8kHz mu-law).
 
-    Files are raw mu-law bytes at 8kHz (no header). Generated from WAV files
-    by generate_test_audio.py. The .ulaw extension matches the .wav base name.
+    Files are raw mu-law bytes at 8kHz (no header). Generated from WAV source
+    files by generate_test_audio.py.
     """
-    ulaw_name = filename.replace(".wav", ".ulaw")
-    filepath = TESTDATA_DIR / ulaw_name
+    filepath = TESTDATA_DIR / filename
     if not filepath.exists():
         pytest.skip(f"Test audio not found: {filepath}. Run generate_test_audio.py.")
     return filepath.read_bytes()
@@ -393,7 +392,7 @@ class TestMultiTurn:
 
     def test_multi_turn_reply(self, connected_adapter: DiscreteTimeAdapter):
         """Two consecutive exchanges, both produce audio responses."""
-        t1_audio = load_telephony_audio("hi_how_are_you.wav")
+        t1_audio = load_telephony_audio("hi_how_are_you.ulaw")
         t1_chunks = chunk_audio(t1_audio, connected_adapter.bytes_per_tick)
 
         # Turn 1: send speech, wait for response
@@ -412,7 +411,7 @@ class TestMultiTurn:
             assert_audio_capping(result, connected_adapter)
 
         # Turn 2: send different audio, wait for response
-        t2_audio = load_telephony_audio("help_me.wav")
+        t2_audio = load_telephony_audio("help_me.ulaw")
         t2_chunks = chunk_audio(t2_audio, connected_adapter.bytes_per_tick)
 
         tick_offset = len(results_t1) + 20
@@ -451,7 +450,7 @@ class TestToolCall:
             modality="audio",
         )
 
-        audio = load_telephony_audio("check_order_12345.wav")
+        audio = load_telephony_audio("check_order_12345.ulaw")
         chunks = chunk_audio(audio, adapter.bytes_per_tick)
 
         # Phase 1: send audio and wait for tool call
@@ -512,8 +511,8 @@ class TestBargeIn:
         )
 
         # Step 2: while agent is producing audio, send speech to trigger barge-in.
-        # Use "help_me.wav" as the interrupting speech.
-        interrupt_audio = load_telephony_audio("help_me.wav")
+        # Use "help_me.ulaw" as the interrupting speech.
+        interrupt_audio = load_telephony_audio("help_me.ulaw")
         interrupt_chunks = chunk_audio(
             interrupt_audio, connected_adapter.bytes_per_tick
         )

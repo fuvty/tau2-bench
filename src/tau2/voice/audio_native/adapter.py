@@ -8,13 +8,15 @@ create_adapter(): Factory function that validates parameters and constructs
    the appropriate adapter subclass for a given provider.
 """
 
+import asyncio
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Optional, Tuple
 
 from loguru import logger
 
 from tau2.config import (
     DEFAULT_AUDIO_NATIVE_MODELS,
+    DEFAULT_AUDIO_NATIVE_VOIP_PACKET_INTERVAL_MS,
     DEFAULT_BUFFER_UNTIL_COMPLETE,
     DEFAULT_FAST_FORWARD_MODE,
     DEFAULT_SEND_AUDIO_INSTANT,
@@ -61,6 +63,7 @@ class DiscreteTimeAdapter(ABC):
         self,
         tick_duration_ms: int,
         audio_format: Optional[AudioFormat] = None,
+        send_audio_instant: bool = DEFAULT_SEND_AUDIO_INSTANT,
     ):
         """Initialize the adapter.
 
@@ -69,6 +72,8 @@ class DiscreteTimeAdapter(ABC):
             audio_format: Audio format for the external interface. Defaults to
                 telephony (8kHz μ-law). Subclasses may pass a different format
                 if their provider uses a non-telephony external format.
+            send_audio_instant: If True, send all audio in one call per tick.
+                If False, send in VoIP-style 20ms chunks with sleeps.
 
         Raises:
             ValueError: If tick_duration_ms is <= 0.
@@ -81,6 +86,8 @@ class DiscreteTimeAdapter(ABC):
         self.bytes_per_tick = int(
             self.audio_format.bytes_per_second * tick_duration_ms / 1000
         )
+        self.send_audio_instant = send_audio_instant
+        self._voip_interval_ms = DEFAULT_AUDIO_NATIVE_VOIP_PACKET_INTERVAL_MS
 
     @abstractmethod
     def connect(
@@ -165,6 +172,35 @@ class DiscreteTimeAdapter(ABC):
             is_error: If True, the tool call failed and result contains error details.
         """
         raise NotImplementedError
+
+    # -----------------------------------------------------------------------
+    # Shared helpers
+    # -----------------------------------------------------------------------
+
+    async def _send_audio_chunked(
+        self,
+        audio: bytes,
+        send_fn: Callable[[bytes], Awaitable[None]],
+        chunk_size: int,
+    ) -> None:
+        """Send audio either instantly or in VoIP-style chunks.
+
+        Args:
+            audio: Audio bytes to send (in provider's format).
+            send_fn: Async callable that sends a chunk to the provider.
+            chunk_size: Bytes per chunk when using VoIP-style sending.
+        """
+        if len(audio) == 0:
+            return
+        if self.send_audio_instant:
+            await send_fn(audio)
+        else:
+            offset = 0
+            while offset < len(audio):
+                chunk = audio[offset : offset + chunk_size]
+                await send_fn(chunk)
+                offset += len(chunk)
+                await asyncio.sleep(self._voip_interval_ms / 1000)
 
 
 # ---------------------------------------------------------------------------

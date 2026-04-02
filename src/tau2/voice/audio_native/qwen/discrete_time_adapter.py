@@ -45,7 +45,6 @@ from tau2.config import (
     DEFAULT_AUDIO_NATIVE_CONNECT_TIMEOUT,
     DEFAULT_AUDIO_NATIVE_DISCONNECT_TIMEOUT,
     DEFAULT_AUDIO_NATIVE_TICK_TIMEOUT_BUFFER,
-    DEFAULT_AUDIO_NATIVE_VOIP_PACKET_INTERVAL_MS,
     DEFAULT_TELEPHONY_RATE,
     TELEPHONY_ULAW_SILENCE,
 )
@@ -102,8 +101,6 @@ class DiscreteTimeQwenAdapter(DiscreteTimeAdapter):
         provider: Optional provider instance. Created lazily if not provided.
     """
 
-    VOIP_PACKET_INTERVAL_MS = DEFAULT_AUDIO_NATIVE_VOIP_PACKET_INTERVAL_MS
-
     def __init__(
         self,
         tick_duration_ms: int,
@@ -122,11 +119,10 @@ class DiscreteTimeQwenAdapter(DiscreteTimeAdapter):
             provider: Optional provider instance. Created lazily if not provided.
             voice: Voice to use. Default: Cherry.
         """
-        super().__init__(tick_duration_ms)
+        super().__init__(tick_duration_ms, send_audio_instant=send_audio_instant)
 
-        self.send_audio_instant = send_audio_instant
         self._chunk_size = int(
-            QWEN_INPUT_BYTES_PER_SECOND * self.VOIP_PACKET_INTERVAL_MS / 1000
+            QWEN_INPUT_BYTES_PER_SECOND * self._voip_interval_ms / 1000
         )
         self.voice = voice
 
@@ -322,26 +318,17 @@ class DiscreteTimeQwenAdapter(DiscreteTimeAdapter):
         qwen_audio = self._audio_converter.convert_input(user_audio)
 
         # Send audio and receive events concurrently
-        async def send_audio():
-            """Send audio (instant or chunked based on config)."""
-            if len(qwen_audio) == 0:
-                return
-            if self.send_audio_instant:
-                await self.provider.send_audio(qwen_audio)
-            else:
-                offset = 0
-                while offset < len(qwen_audio):
-                    chunk = qwen_audio[offset : offset + self._chunk_size]
-                    await self.provider.send_audio(chunk)
-                    offset += len(chunk)
-                    await asyncio.sleep(self.VOIP_PACKET_INTERVAL_MS / 1000)
-
         async def receive_events():
             elapsed_so_far = asyncio.get_running_loop().time() - tick_start
             remaining = max(0.01, (self.tick_duration_ms / 1000) - elapsed_so_far)
             return await self.provider.receive_events_for_duration(remaining)
 
-        _, events = await asyncio.gather(send_audio(), receive_events())
+        _, events = await asyncio.gather(
+            self._send_audio_chunked(
+                qwen_audio, self.provider.send_audio, self._chunk_size
+            ),
+            receive_events(),
+        )
 
         # Process all received events
         for event in events:

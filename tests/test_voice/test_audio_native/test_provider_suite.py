@@ -54,6 +54,7 @@ from typing import List, Optional
 
 import pytest
 
+from tau2.config import TELEPHONY_ULAW_SILENCE
 from tau2.environment.tool import Tool
 from tau2.voice.audio_native.adapter import DiscreteTimeAdapter, create_adapter
 from tau2.voice.audio_native.tick_result import TickResult
@@ -168,7 +169,7 @@ def chunk_audio(
         trailing_silence_chunks: Number of silence chunks to append after speech.
             Helps VAD detect end-of-utterance.
     """
-    silence_byte = b"\x7f"  # mu-law silence
+    silence_byte = TELEPHONY_ULAW_SILENCE
     chunks = []
     for i in range(0, len(audio), chunk_size):
         chunk = audio[i : i + chunk_size]
@@ -183,7 +184,7 @@ def chunk_audio(
 def make_silence(tick_duration_ms: int = TICK_DURATION_MS) -> bytes:
     """Generate one tick of mu-law silence at 8kHz."""
     num_bytes = int(8000 * tick_duration_ms / 1000)
-    return b"\x7f" * num_bytes
+    return TELEPHONY_ULAW_SILENCE * num_bytes
 
 
 def _make_order_tool() -> Tool:

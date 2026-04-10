@@ -202,6 +202,10 @@ class ParticipantMessageBase(BaseModel):
         description="The content of the message. Text content or base64-encoded audio bytes.",
         default=None,
     )
+    reasoning_content: Optional[str] = Field(
+        description="Provider-specific hidden reasoning content associated with the message.",
+        default=None,
+    )
     tool_calls: Optional[list[ToolCall]] = Field(
         description="The tool calls made in the message.", default=None
     )
@@ -213,6 +217,14 @@ class ParticipantMessageBase(BaseModel):
     # --- Metadata ---
     turn_idx: Optional[int] = None
     timestamp: Optional[str] = Field(default_factory=get_now)
+    start_time: Optional[str] = Field(
+        description="ISO timestamp when LLM generation started for this message.",
+        default=None,
+    )
+    end_time: Optional[str] = Field(
+        description="ISO timestamp when LLM generation finished for this message.",
+        default=None,
+    )
     cost: Optional[float] = None
     usage: Optional[dict] = None
     raw_data: Optional[dict] = None
@@ -359,6 +371,8 @@ class ParticipantMessageBase(BaseModel):
             )
         if self.has_text_content():
             lines.append(f"content: {self.content}")
+        if self.reasoning_content:
+            lines.append(f"reasoning_content: {self.reasoning_content}")
         if self.is_tool_call():
             lines.append("ToolCalls:")
             lines.extend([str(tc) for tc in self.tool_calls])
@@ -373,6 +387,7 @@ class ParticipantMessageBase(BaseModel):
         return (
             self.role == other.role
             and self.content == other.content
+            and self.reasoning_content == other.reasoning_content
             and self.is_audio == other.is_audio
             and self.tool_calls == other.tool_calls
             and self.audio_content == other.audio_content
@@ -398,6 +413,7 @@ class AssistantMessage(ParticipantMessageBase):
         content: str,
         *,
         tool_calls: Optional[list[ToolCall]] = None,
+        reasoning_content: Optional[str] = None,
         cost: Optional[float] = None,
         usage: Optional[dict] = None,
         raw_data: Optional[dict] = None,
@@ -407,6 +423,7 @@ class AssistantMessage(ParticipantMessageBase):
         return cls(
             role="assistant",
             content=content,
+            reasoning_content=reasoning_content,
             tool_calls=tool_calls,
             cost=cost,
             usage=usage,
@@ -428,6 +445,7 @@ class AssistantMessage(ParticipantMessageBase):
         source_effects: Optional[SourceEffectsResult] = None,
         channel_effects: Optional[ChannelEffectsResult] = None,
         tool_calls: Optional[list[ToolCall]] = None,
+        reasoning_content: Optional[str] = None,
         cost: Optional[float] = None,
         usage: Optional[dict] = None,
         raw_data: Optional[dict] = None,
@@ -443,6 +461,7 @@ class AssistantMessage(ParticipantMessageBase):
         return cls(
             role="assistant",
             content=content,
+            reasoning_content=reasoning_content,
             tool_calls=tool_calls,
             is_audio=is_audio,
             audio_content=audio_content,
@@ -484,6 +503,7 @@ class UserMessage(ParticipantMessageBase):
         content: str,
         *,
         tool_calls: Optional[list[ToolCall]] = None,
+        reasoning_content: Optional[str] = None,
         cost: Optional[float] = None,
         usage: Optional[dict] = None,
         raw_data: Optional[dict] = None,
@@ -493,6 +513,7 @@ class UserMessage(ParticipantMessageBase):
         return cls(
             role="user",
             content=content,
+            reasoning_content=reasoning_content,
             tool_calls=tool_calls,
             cost=cost,
             usage=usage,
@@ -514,6 +535,7 @@ class UserMessage(ParticipantMessageBase):
         source_effects: Optional[SourceEffectsResult] = None,
         channel_effects: Optional[ChannelEffectsResult] = None,
         tool_calls: Optional[list[ToolCall]] = None,
+        reasoning_content: Optional[str] = None,
         cost: Optional[float] = None,
         usage: Optional[dict] = None,
         raw_data: Optional[dict] = None,
@@ -529,6 +551,7 @@ class UserMessage(ParticipantMessageBase):
         return cls(
             role="user",
             content=content,
+            reasoning_content=reasoning_content,
             tool_calls=tool_calls,
             is_audio=is_audio,
             audio_content=audio_content,
@@ -681,6 +704,9 @@ class Tick(BaseModel):
             agent_msg = AssistantMessage(
                 role="assistant",
                 content=self.agent_chunk.content if self.agent_chunk else None,
+                reasoning_content=(
+                    self.agent_chunk.reasoning_content if self.agent_chunk else None
+                ),
                 tool_calls=self.agent_tool_calls or None,
                 timestamp=(
                     self.agent_chunk.timestamp if self.agent_chunk else self.timestamp
@@ -714,6 +740,9 @@ class Tick(BaseModel):
             user_msg = UserMessage(
                 role="user",
                 content=self.user_chunk.content if self.user_chunk else None,
+                reasoning_content=(
+                    self.user_chunk.reasoning_content if self.user_chunk else None
+                ),
                 tool_calls=self.user_tool_calls or None,
                 timestamp=(
                     self.user_chunk.timestamp if self.user_chunk else self.timestamp
@@ -847,6 +876,8 @@ def merge_message_chunks(
         prev_utterance_ids = chunk_utterance_ids
 
     merged_content = "".join(content_parts)
+    reasoning_parts = [chunk.reasoning_content for chunk in chunks if chunk.reasoning_content]
+    merged_reasoning_content = "\n".join(reasoning_parts) if reasoning_parts else None
 
     # --- Merge utterance_ids (order-preserving dedup) ---
     merged_utterance_ids: list[str] = []
@@ -877,6 +908,7 @@ def merge_message_chunks(
     return message_class(
         role=first_role,
         content=merged_content,
+        reasoning_content=merged_reasoning_content,
         is_audio=first_is_audio,
         audio_content=merged_audio_content,
         audio_format=deepcopy(first_format) if first_format else None,

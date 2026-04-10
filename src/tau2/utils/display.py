@@ -2403,9 +2403,14 @@ class MarkdownDisplay:
         return f"```json\n{json.dumps([action.model_dump() for action in actions], indent=2)}\n```"
 
     @classmethod
-    def display_messages(cls, messages: list[Message]) -> str:
+    def display_messages(
+        cls, messages: list[Message], show_reasoning_content: bool = False
+    ) -> str:
         """Display messages in markdown format."""
-        return "\n\n".join(cls.display_message(msg) for msg in messages)
+        return "\n\n".join(
+            cls.display_message(msg, show_reasoning_content=show_reasoning_content)
+            for msg in messages
+        )
 
     @classmethod
     def display_simulation(cls, sim: SimulationRun) -> str:
@@ -2508,7 +2513,10 @@ class MarkdownDisplay:
         messages = sim.get_messages()
         if messages:
             output.append("\n**Messages**:")
-            output.extend(cls.display_message(msg) for msg in messages)
+            output.extend(
+                cls.display_message(msg, show_reasoning_content=True)
+                for msg in messages
+            )
 
         if sim.effect_timeline and sim.effect_timeline.events:
             effect_config_md = cls.display_effect_configs(sim)
@@ -2621,7 +2629,9 @@ class MarkdownDisplay:
         return "\n".join(output)
 
     @classmethod
-    def display_message(cls, msg: Message) -> str:
+    def display_message(
+        cls, msg: Message, show_reasoning_content: bool = False
+    ) -> str:
         """Display a single message in markdown format."""
         # Common message components
         parts = []
@@ -2634,6 +2644,10 @@ class MarkdownDisplay:
             parts.append(f"{turn_prefix}**{msg.role}**:")
             if msg.content:
                 parts.append(msg.content)
+            if show_reasoning_content and msg.reasoning_content:
+                parts.append(
+                    f"**Reasoning**\n```text\n{msg.reasoning_content}\n```"
+                )
             if msg.tool_calls:
                 tool_calls = []
                 for tool in msg.tool_calls:

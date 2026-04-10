@@ -188,13 +188,14 @@ def to_litellm_messages(messages: list[Message]) -> list[dict]:
                     }
                     for tc in message.tool_calls
                 ]
-            litellm_messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.content,
-                    "tool_calls": tool_calls,
-                }
-            )
+            assistant_message = {
+                "role": "assistant",
+                "content": message.content,
+                "tool_calls": tool_calls,
+            }
+            if message.reasoning_content is not None:
+                assistant_message["reasoning_content"] = message.reasoning_content
+            litellm_messages.append(assistant_message)
         elif isinstance(message, ToolMessage):
             litellm_messages.append(
                 {
@@ -285,6 +286,12 @@ def _format_messages_for_logging(messages: list[dict]) -> list[dict]:
             content_lines = msg_copy["content"].split("\n")
             if len(content_lines) > 1:
                 msg_copy["content"] = content_lines
+        if "reasoning_content" in msg_copy and isinstance(
+            msg_copy["reasoning_content"], str
+        ):
+            reasoning_lines = msg_copy["reasoning_content"].split("\n")
+            if len(reasoning_lines) > 1:
+                msg_copy["reasoning_content"] = reasoning_lines
         formatted.append(msg_copy)
     return formatted
 
@@ -404,6 +411,7 @@ def generate(
     }
     request_timestamp = datetime.now().isoformat()
 
+    generation_start_time = datetime.now().isoformat()
     start_time = time.perf_counter()
     try:
         response = completion(
@@ -417,6 +425,7 @@ def generate(
         logger.error(e)
         raise e
     generation_time_seconds = time.perf_counter() - start_time
+    generation_end_time = datetime.now().isoformat()
     cost = get_response_cost(response)
     usage = get_response_usage(response)
 
@@ -432,6 +441,7 @@ def generate(
         "The response should be an assistant message"
     )
     content = response_choice.message.content
+    reasoning_content = getattr(response_choice.message, "reasoning_content", None)
     raw_tool_calls = response_choice.message.tool_calls or []
     tool_calls = [
         ToolCall(
@@ -446,7 +456,10 @@ def generate(
     message = AssistantMessage(
         role="assistant",
         content=content,
+        reasoning_content=reasoning_content,
         tool_calls=tool_calls,
+        start_time=generation_start_time,
+        end_time=generation_end_time,
         cost=cost,
         usage=usage,
         raw_data=response.to_dict(),
@@ -457,6 +470,7 @@ def generate(
     response_data = {
         "timestamp": datetime.now().isoformat(),
         "content": content,
+        "reasoning_content": reasoning_content,
         "tool_calls": [tc.model_dump() for tc in tool_calls] if tool_calls else None,
         "cost": cost,
         "usage": usage,

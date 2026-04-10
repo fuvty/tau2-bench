@@ -164,7 +164,10 @@ def get_full_trajectory_string(simulation: SimulationRun) -> str:
             effect_timeline=simulation.effect_timeline,
         )
     else:
-        return MarkdownDisplay.display_messages(simulation.messages)
+        return MarkdownDisplay.display_messages(
+            simulation.messages,
+            show_reasoning_content=True,
+        )
 
 
 def get_user_visible_trajectory_string(simulation: SimulationRun) -> str:

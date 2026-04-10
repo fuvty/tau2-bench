@@ -72,6 +72,7 @@ class UserState(BaseModel):
                         role="assistant",
                         tool_calls=message.tool_calls,
                         content=message.content,
+                        reasoning_content=message.reasoning_content,
                     )
                 )
             elif isinstance(message, AssistantMessage):

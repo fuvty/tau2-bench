@@ -1,3 +1,7 @@
+import json
+import os
+from copy import deepcopy
+
 # =============================================================================
 # SIMULATION DEFAULTS (overridable via CLI)
 # =============================================================================
@@ -25,11 +29,53 @@ DEFAULT_LLM_NL_ASSERTIONS = "gpt-4.1-2025-04-14"
 DEFAULT_LLM_NL_ASSERTIONS_TEMPERATURE = 0.0
 DEFAULT_LLM_NL_ASSERTIONS_ARGS = {"temperature": DEFAULT_LLM_NL_ASSERTIONS_TEMPERATURE}
 
+TAU2_LLM_NL_ASSERTIONS_MODEL_ENV_VAR = "TAU2_LLM_NL_ASSERTIONS_MODEL"
+TAU2_LLM_NL_ASSERTIONS_ARGS_ENV_VAR = "TAU2_LLM_NL_ASSERTIONS_ARGS"
+TAU2_LLM_NL_ASSERTIONS_API_BASE_ENV_VAR = "TAU2_LLM_NL_ASSERTIONS_API_BASE"
+TAU2_LLM_NL_ASSERTIONS_API_KEY_ENV_VAR = "TAU2_LLM_NL_ASSERTIONS_API_KEY"
+TAU2_LLM_NL_ASSERTIONS_TEMPERATURE_ENV_VAR = "TAU2_LLM_NL_ASSERTIONS_TEMPERATURE"
+
 DEFAULT_LLM_ENV_INTERFACE = "gpt-4.1-2025-04-14"
 DEFAULT_LLM_ENV_INTERFACE_TEMPERATURE = 0.0
 DEFAULT_LLM_ENV_INTERFACE_ARGS = {"temperature": DEFAULT_LLM_ENV_INTERFACE_TEMPERATURE}
 
 DEFAULT_LLM_EVAL_USER_SIMULATOR = "claude-opus-4-5"
+
+
+def get_nl_assertions_llm_config() -> tuple[str, dict]:
+    """Return the model and args used by the NL-assertions judge.
+
+    The defaults come from ``DEFAULT_LLM_NL_ASSERTIONS`` and
+    ``DEFAULT_LLM_NL_ASSERTIONS_ARGS``. Local or custom deployments can override
+    them with environment variables without patching code:
+
+    - ``TAU2_LLM_NL_ASSERTIONS_MODEL``
+    - ``TAU2_LLM_NL_ASSERTIONS_ARGS`` (JSON object)
+    - ``TAU2_LLM_NL_ASSERTIONS_API_BASE``
+    - ``TAU2_LLM_NL_ASSERTIONS_API_KEY``
+    - ``TAU2_LLM_NL_ASSERTIONS_TEMPERATURE``
+    """
+
+    model = os.getenv(TAU2_LLM_NL_ASSERTIONS_MODEL_ENV_VAR, DEFAULT_LLM_NL_ASSERTIONS)
+    llm_args = deepcopy(DEFAULT_LLM_NL_ASSERTIONS_ARGS)
+
+    raw_args = os.getenv(TAU2_LLM_NL_ASSERTIONS_ARGS_ENV_VAR)
+    if raw_args:
+        llm_args.update(json.loads(raw_args))
+
+    api_base = os.getenv(TAU2_LLM_NL_ASSERTIONS_API_BASE_ENV_VAR)
+    if api_base:
+        llm_args["api_base"] = api_base
+
+    api_key = os.getenv(TAU2_LLM_NL_ASSERTIONS_API_KEY_ENV_VAR)
+    if api_key:
+        llm_args["api_key"] = api_key
+
+    temperature = os.getenv(TAU2_LLM_NL_ASSERTIONS_TEMPERATURE_ENV_VAR)
+    if temperature is not None:
+        llm_args["temperature"] = float(temperature)
+
+    return model, llm_args
 
 # LLM debug logging
 DEFAULT_LLM_LOG_MODE = "latest"  # Options: "all", "latest"

@@ -246,9 +246,13 @@ class UserSimulator(
         user_message = UserMessage(
             role="user",
             content=user_response,
+            reasoning_content=assistant_message.reasoning_content,
+            start_time=assistant_message.start_time,
+            end_time=assistant_message.end_time,
             cost=assistant_message.cost,
             usage=assistant_message.usage,
             raw_data=assistant_message.raw_data,
+            generation_time_seconds=assistant_message.generation_time_seconds,
         )
 
         # flip the requestor of the tool calls

@@ -1279,17 +1279,23 @@ class VoiceStreamingUserSimulator(
         user_message = UserMessage(
             role="user",
             content=assistant_message.content,
+            reasoning_content=assistant_message.reasoning_content,
+            start_time=assistant_message.start_time,
+            end_time=assistant_message.end_time,
             cost=assistant_message.cost,
             usage=assistant_message.usage,
             raw_data=assistant_message.raw_data,
+            generation_time_seconds=assistant_message.generation_time_seconds,
         )
 
         my_str = ""
         for message in linearized_messages:
-            my_str += f"{message.role}: {message.content}\n"
+            my_str += f"{_format_message_for_debug_log(message)}\n"
 
         logger.info(
-            f"USER SIMULATOR:\nSent to LLM:\n{my_str}\nReceived from LLM:\n{user_message.content}\n\n\n"
+            "USER SIMULATOR:\n"
+            f"Sent to LLM:\n{my_str}\n"
+            f"Received from LLM:\n{_format_message_for_debug_log(user_message)}\n\n\n"
         )
 
         # Flip the requestor of tool calls
@@ -1358,6 +1364,7 @@ class VoiceStreamingUserSimulator(
                         role="assistant",
                         tool_calls=msg.tool_calls,
                         content=msg.content,
+                        reasoning_content=msg.reasoning_content,
                     )
                 )
             elif isinstance(msg, AssistantMessage):
@@ -1429,3 +1436,14 @@ def _format_conversation_history(messages: list[Message]) -> str:
         if content:
             formatted_lines.append(f"{role}: {content}")
     return "\n".join(formatted_lines)
+
+
+def _format_message_for_debug_log(message: Message) -> str:
+    """Format a message for concise debug logging."""
+    parts = [f"{message.role}: {message.content}"]
+    if isinstance(message, (AssistantMessage, UserMessage)) and message.reasoning_content:
+        parts.append(f"reasoning={message.reasoning_content}")
+    if isinstance(message, (AssistantMessage, UserMessage)) and message.tool_calls:
+        tool_names = ", ".join(tool_call.name for tool_call in message.tool_calls)
+        parts.append(f"tool_calls={tool_names}")
+    return " | ".join(parts)

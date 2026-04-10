@@ -1,12 +1,80 @@
 import math
 import re
 from collections import defaultdict
-
+import numpy as np
 import pandas as pd
 from loguru import logger
 from pydantic import BaseModel
 
-from tau2.data_model.simulation import Results, TerminationReason
+from tau2.data_model.message import AssistantMessage, UserMessage
+from tau2.data_model.simulation import Results, SimulationRun, TerminationReason
+
+
+class TrajectoryTokenStats(BaseModel):
+    """Per-request prefill and decode token lengths for a single trajectory."""
+
+    simulation_id: str
+    task_id: str
+    # Agent (assistant) LLM calls
+    prefill_lengths: list[int]  # prompt_tokens per agent request
+    decode_lengths: list[int]  # completion_tokens per agent request
+    num_requests: int
+    # User simulator LLM calls
+    user_prefill_lengths: list[int] = []
+    user_decode_lengths: list[int] = []
+    user_num_requests: int = 0
+
+    @property
+    def total_prefill(self) -> int:
+        return sum(self.prefill_lengths)
+
+    @property
+    def total_decode(self) -> int:
+        return sum(self.decode_lengths)
+
+    @property
+    def user_total_prefill(self) -> int:
+        return sum(self.user_prefill_lengths)
+
+    @property
+    def user_total_decode(self) -> int:
+        return sum(self.user_decode_lengths)
+
+
+def get_trajectory_token_stats(sim: SimulationRun) -> TrajectoryTokenStats:
+    """Extract per-request prefill/decode token lengths from a simulation trajectory."""
+    prefill_lengths: list[int] = []
+    decode_lengths: list[int] = []
+    user_prefill_lengths: list[int] = []
+    user_decode_lengths: list[int] = []
+    for msg in sim.get_messages():
+        if isinstance(msg, AssistantMessage) and msg.usage is not None:
+            prefill_lengths.append(msg.usage.get("prompt_tokens", 0))
+            decode_lengths.append(msg.usage.get("completion_tokens", 0))
+        elif isinstance(msg, UserMessage) and msg.usage is not None:
+            user_prefill_lengths.append(msg.usage.get("prompt_tokens", 0))
+            user_decode_lengths.append(msg.usage.get("completion_tokens", 0))
+    return TrajectoryTokenStats(
+        simulation_id=sim.id,
+        task_id=sim.task_id,
+        prefill_lengths=prefill_lengths,
+        decode_lengths=decode_lengths,
+        num_requests=len(prefill_lengths),
+        user_prefill_lengths=user_prefill_lengths,
+        user_decode_lengths=user_decode_lengths,
+        user_num_requests=len(user_prefill_lengths),
+    )
+
+
+def get_all_trajectory_token_stats(
+    results: Results,
+) -> list[TrajectoryTokenStats]:
+    """Extract per-request prefill/decode distributions for every trajectory."""
+    return [
+        get_trajectory_token_stats(sim)
+        for sim in results.simulations
+        if sim.termination_reason != TerminationReason.INFRASTRUCTURE_ERROR
+    ]
 
 
 def is_successful(reward: float) -> bool:
@@ -50,6 +118,36 @@ class AgentMetrics(BaseModel):
     termination_max_steps: int = 0
     termination_error: int = 0
     termination_infrastructure_error: int = 0
+
+    # Runtime metrics
+    avg_duration: float = 0.0
+    total_duration: float = 0.0
+    min_duration: float = 0.0
+    max_duration: float = 0.0
+
+    # Token usage metrics — agent (assistant) LLM calls
+    agent_total_requests: int = 0
+    agent_avg_prefill: float = 0.0
+    agent_avg_decode: float = 0.0
+    agent_median_prefill: float = 0.0
+    agent_median_decode: float = 0.0
+    agent_p90_prefill: float = 0.0
+    agent_p90_decode: float = 0.0
+    agent_avg_requests_per_trajectory: float = 0.0
+    agent_avg_total_prefill_per_trajectory: float = 0.0
+    agent_avg_total_decode_per_trajectory: float = 0.0
+
+    # Token usage metrics — user simulator LLM calls
+    user_total_requests: int = 0
+    user_avg_prefill: float = 0.0
+    user_avg_decode: float = 0.0
+    user_median_prefill: float = 0.0
+    user_median_decode: float = 0.0
+    user_p90_prefill: float = 0.0
+    user_p90_decode: float = 0.0
+    user_avg_requests_per_trajectory: float = 0.0
+    user_avg_total_prefill_per_trajectory: float = 0.0
+    user_avg_total_decode_per_trajectory: float = 0.0
 
     # Responsiveness metrics (from full-duplex/streaming mode)
     sims_with_unresponsive_period: int = 0
@@ -101,6 +199,30 @@ class AgentMetrics(BaseModel):
         data = {
             "avg_reward": self.avg_reward,
             "avg_agent_cost": self.avg_agent_cost,
+            "avg_duration": self.avg_duration,
+            "total_duration": self.total_duration,
+            "min_duration": self.min_duration,
+            "max_duration": self.max_duration,
+            "agent_total_requests": self.agent_total_requests,
+            "agent_avg_prefill": self.agent_avg_prefill,
+            "agent_avg_decode": self.agent_avg_decode,
+            "agent_median_prefill": self.agent_median_prefill,
+            "agent_median_decode": self.agent_median_decode,
+            "agent_p90_prefill": self.agent_p90_prefill,
+            "agent_p90_decode": self.agent_p90_decode,
+            "agent_avg_requests_per_trajectory": self.agent_avg_requests_per_trajectory,
+            "agent_avg_total_prefill_per_trajectory": self.agent_avg_total_prefill_per_trajectory,
+            "agent_avg_total_decode_per_trajectory": self.agent_avg_total_decode_per_trajectory,
+            "user_total_requests": self.user_total_requests,
+            "user_avg_prefill": self.user_avg_prefill,
+            "user_avg_decode": self.user_avg_decode,
+            "user_median_prefill": self.user_median_prefill,
+            "user_median_decode": self.user_median_decode,
+            "user_p90_prefill": self.user_p90_prefill,
+            "user_p90_decode": self.user_p90_decode,
+            "user_avg_requests_per_trajectory": self.user_avg_requests_per_trajectory,
+            "user_avg_total_prefill_per_trajectory": self.user_avg_total_prefill_per_trajectory,
+            "user_avg_total_decode_per_trajectory": self.user_avg_total_decode_per_trajectory,
             "total_simulations": self.total_simulations,
             "total_tasks": self.total_tasks,
             "infra_error_count": self.infra_error_count,
@@ -243,6 +365,52 @@ def compute_metrics(results: Results) -> AgentMetrics:
             k = int(match.group(1))
             pass_hat_ks[k] = df_pass_hat_k[column].mean()
     avg_agent_cost = df.agent_cost.mean()
+
+    # Runtime metrics
+    durations = [sim.duration for sim in evaluated_sims if sim.duration is not None]
+    avg_duration = sum(durations) / len(durations) if durations else 0.0
+    total_duration = sum(durations)
+    min_duration = min(durations) if durations else 0.0
+    max_duration = max(durations) if durations else 0.0
+
+    # Token usage metrics (prefill/decode per request), separated by role
+    traj_stats = [get_trajectory_token_stats(sim) for sim in evaluated_sims]
+    num_traj = len(traj_stats)
+
+    def _compute_token_stats(all_lengths: list[int]) -> tuple[float, float, float]:
+        """Return (avg, median, p90) for a list of token counts."""
+        if not all_lengths:
+            return 0.0, 0.0, 0.0
+        arr = np.array(all_lengths)
+        return float(arr.mean()), float(np.median(arr)), float(np.percentile(arr, 90))
+
+    # Agent (assistant) LLM stats
+    agent_all_prefills = [p for ts in traj_stats for p in ts.prefill_lengths]
+    agent_all_decodes = [d for ts in traj_stats for d in ts.decode_lengths]
+    agent_total_requests = len(agent_all_prefills)
+    agent_avg_prefill, agent_median_prefill, agent_p90_prefill = _compute_token_stats(agent_all_prefills)
+    agent_avg_decode, agent_median_decode, agent_p90_decode = _compute_token_stats(agent_all_decodes)
+    agent_avg_requests_per_trajectory = agent_total_requests / num_traj if num_traj > 0 else 0.0
+    agent_avg_total_prefill_per_trajectory = (
+        sum(ts.total_prefill for ts in traj_stats) / num_traj if num_traj > 0 else 0.0
+    )
+    agent_avg_total_decode_per_trajectory = (
+        sum(ts.total_decode for ts in traj_stats) / num_traj if num_traj > 0 else 0.0
+    )
+
+    # User simulator LLM stats
+    user_all_prefills = [p for ts in traj_stats for p in ts.user_prefill_lengths]
+    user_all_decodes = [d for ts in traj_stats for d in ts.user_decode_lengths]
+    user_total_requests = len(user_all_prefills)
+    user_avg_prefill, user_median_prefill, user_p90_prefill = _compute_token_stats(user_all_prefills)
+    user_avg_decode, user_median_decode, user_p90_decode = _compute_token_stats(user_all_decodes)
+    user_avg_requests_per_trajectory = user_total_requests / num_traj if num_traj > 0 else 0.0
+    user_avg_total_prefill_per_trajectory = (
+        sum(ts.user_total_prefill for ts in traj_stats) / num_traj if num_traj > 0 else 0.0
+    )
+    user_avg_total_decode_per_trajectory = (
+        sum(ts.user_total_decode for ts in traj_stats) / num_traj if num_traj > 0 else 0.0
+    )
 
     # Counts exclude infrastructure errors
     total_simulations = len(evaluated_sims)
@@ -447,6 +615,30 @@ def compute_metrics(results: Results) -> AgentMetrics:
         avg_reward=avg_reward,
         pass_hat_ks=pass_hat_ks,
         avg_agent_cost=avg_agent_cost,
+        avg_duration=avg_duration,
+        total_duration=total_duration,
+        min_duration=min_duration,
+        max_duration=max_duration,
+        agent_total_requests=agent_total_requests,
+        agent_avg_prefill=agent_avg_prefill,
+        agent_avg_decode=agent_avg_decode,
+        agent_median_prefill=agent_median_prefill,
+        agent_median_decode=agent_median_decode,
+        agent_p90_prefill=agent_p90_prefill,
+        agent_p90_decode=agent_p90_decode,
+        agent_avg_requests_per_trajectory=agent_avg_requests_per_trajectory,
+        agent_avg_total_prefill_per_trajectory=agent_avg_total_prefill_per_trajectory,
+        agent_avg_total_decode_per_trajectory=agent_avg_total_decode_per_trajectory,
+        user_total_requests=user_total_requests,
+        user_avg_prefill=user_avg_prefill,
+        user_avg_decode=user_avg_decode,
+        user_median_prefill=user_median_prefill,
+        user_median_decode=user_median_decode,
+        user_p90_prefill=user_p90_prefill,
+        user_p90_decode=user_p90_decode,
+        user_avg_requests_per_trajectory=user_avg_requests_per_trajectory,
+        user_avg_total_prefill_per_trajectory=user_avg_total_prefill_per_trajectory,
+        user_avg_total_decode_per_trajectory=user_avg_total_decode_per_trajectory,
         total_simulations=total_simulations,
         total_tasks=total_tasks,
         infra_error_count=infra_error_count,
@@ -488,6 +680,13 @@ def display_metrics(metrics: AgentMetrics) -> None:
     for k, pass_hat_k in metrics.pass_hat_ks.items():
         print(f"  k={k}: {pass_hat_k}")
     print(f"💰 Average agent cost: {metrics.avg_agent_cost}")
+    print(f"⏱️ Runtime: avg={metrics.avg_duration:.2f}s, total={metrics.total_duration:.2f}s, min={metrics.min_duration:.2f}s, max={metrics.max_duration:.2f}s")
+    print(f"📊 Agent LLM ({metrics.agent_total_requests} requests, avg {metrics.agent_avg_requests_per_trajectory:.1f} req/traj):")
+    print(f"  Prefill  — avg={metrics.agent_avg_prefill:.0f}, median={metrics.agent_median_prefill:.0f}, p90={metrics.agent_p90_prefill:.0f}, avg_total/traj={metrics.agent_avg_total_prefill_per_trajectory:.0f}")
+    print(f"  Decode   — avg={metrics.agent_avg_decode:.0f}, median={metrics.agent_median_decode:.0f}, p90={metrics.agent_p90_decode:.0f}, avg_total/traj={metrics.agent_avg_total_decode_per_trajectory:.0f}")
+    print(f"👤 User LLM ({metrics.user_total_requests} requests, avg {metrics.user_avg_requests_per_trajectory:.1f} req/traj):")
+    print(f"  Prefill  — avg={metrics.user_avg_prefill:.0f}, median={metrics.user_median_prefill:.0f}, p90={metrics.user_p90_prefill:.0f}, avg_total/traj={metrics.user_avg_total_prefill_per_trajectory:.0f}")
+    print(f"  Decode   — avg={metrics.user_avg_decode:.0f}, median={metrics.user_median_decode:.0f}, p90={metrics.user_p90_decode:.0f}, avg_total/traj={metrics.user_avg_total_decode_per_trajectory:.0f}")
 
 
 if __name__ == "__main__":

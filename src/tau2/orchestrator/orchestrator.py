@@ -99,6 +99,7 @@ class BaseOrchestrator(ABC, Generic[BaseAgentT, BaseUserT, TrajectoryItemT]):
         seed: Optional[int] = None,
         simulation_id: Optional[str] = None,
         timeout: Optional[float] = None,
+        max_context_length: Optional[int] = None,
     ):
         """
         Initialize the base orchestrator.
@@ -114,6 +115,9 @@ class BaseOrchestrator(ABC, Generic[BaseAgentT, BaseUserT, TrajectoryItemT]):
             seed: Optional random seed for reproducibility. Defaults to None.
             simulation_id: Optional simulation ID. Defaults to generated UUID.
             timeout: Maximum wallclock time in seconds. None means no timeout.
+            max_context_length: Maximum context length in tokens per LLM request.
+                If the last request's prompt_tokens exceeds this, terminate with
+                CONTEXT_WINDOW_EXCEEDED. None means no limit.
         """
         self.domain = domain
         self.agent: BaseAgentT = agent
@@ -131,6 +135,7 @@ class BaseOrchestrator(ABC, Generic[BaseAgentT, BaseUserT, TrajectoryItemT]):
         self.max_steps: int = max_steps
         self.max_errors: int = max_errors
         self.timeout: Optional[float] = timeout
+        self.max_context_length: Optional[int] = max_context_length
         self.step_count: int = 0
         self.done: bool = False
         self.termination_reason: Optional[TerminationReason] = None
@@ -234,6 +239,25 @@ class BaseOrchestrator(ABC, Generic[BaseAgentT, BaseUserT, TrajectoryItemT]):
                 logger.info(
                     f"Simulation timed out after {elapsed:.1f}s (timeout={self.timeout}s)"
                 )
+
+    def _check_context_length(self) -> None:
+        """Terminate if the last LLM request's prompt_tokens exceeded max_context_length."""
+        if self.max_context_length is None or self.done:
+            return
+        if not self.trajectory:
+            return
+        last_msg = self.trajectory[-1]
+        usage = getattr(last_msg, "usage", None)
+        if usage is None:
+            return
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        if prompt_tokens >= self.max_context_length:
+            self.done = True
+            self.termination_reason = TerminationReason.CONTEXT_WINDOW_EXCEEDED
+            logger.info(
+                f"Context window exceeded: prompt_tokens={prompt_tokens} >= "
+                f"max_context_length={self.max_context_length}"
+            )
 
     def _cleanup(self) -> None:
         """Best-effort cleanup of agent and user resources.
@@ -405,6 +429,7 @@ class Orchestrator(BaseOrchestrator[AgentT, UserT, Message]):
         simulation_id: Optional[str] = None,
         validate_communication: bool = False,
         timeout: Optional[float] = None,
+        max_context_length: Optional[int] = None,
     ):
         """
         Initialize the Orchestrator for managing simulation between Agent, User, and Environment.
@@ -428,6 +453,7 @@ class Orchestrator(BaseOrchestrator[AgentT, UserT, Message]):
             validate_communication: If True, validates communication protocol rules (e.g., no mixed
                                    messages with both text and tool calls). Defaults to False.
             timeout: Maximum wallclock time in seconds. None means no timeout.
+            max_context_length: Maximum context length in tokens per LLM request. None means no limit.
         """
         # Initialize base class
         super().__init__(
@@ -441,6 +467,7 @@ class Orchestrator(BaseOrchestrator[AgentT, UserT, Message]):
             seed=seed,
             simulation_id=simulation_id,
             timeout=timeout,
+            max_context_length=max_context_length,
         )
 
         # Half-duplex specific attributes
@@ -748,6 +775,7 @@ class Orchestrator(BaseOrchestrator[AgentT, UserT, Message]):
             self.done = True
             self.termination_reason = TerminationReason.TOO_MANY_ERRORS
         self._check_timeout()
+        self._check_context_length()
 
     def _finalize(self) -> SimulationRun:
         """

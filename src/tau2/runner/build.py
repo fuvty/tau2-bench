@@ -395,6 +395,7 @@ def build_text_orchestrator(
         simulation_id=simulation_id,
         validate_communication=config.enforce_communication_protocol,
         timeout=config.timeout,
+        max_context_length=config.max_context_length,
     )
 
     logger.debug(

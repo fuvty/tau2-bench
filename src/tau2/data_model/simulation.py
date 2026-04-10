@@ -546,6 +546,15 @@ class TextRunConfig(BaseRunConfig):
             default=False,
         ),
     ]
+    max_context_length: Annotated[
+        Optional[int],
+        Field(
+            description="Maximum context length (in tokens) per LLM request. "
+            "If the last request's prompt_tokens exceeds this, the simulation "
+            "terminates with CONTEXT_WINDOW_EXCEEDED. None means no limit.",
+            default=None,
+        ),
+    ]
     text_streaming_config: Annotated[
         Optional[dict],
         Field(

@@ -109,6 +109,7 @@ def analyze(results_path: Path, output_path: Path | None = None):
         # --- Token totals ---
         ts = get_trajectory_token_stats(sim)
         print(f"  Agent Token Totals: prefill={ts.total_prefill}, decode={ts.total_decode}, requests={ts.num_requests}")
+        print(f"  User  Token Totals: prefill={ts.user_total_prefill}, decode={ts.user_total_decode}, requests={ts.user_num_requests}")
 
     # --- Aggregate metrics ---
     print()

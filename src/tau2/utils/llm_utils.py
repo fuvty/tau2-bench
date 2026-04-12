@@ -190,7 +190,7 @@ def to_litellm_messages(messages: list[Message]) -> list[dict]:
                 ]
             assistant_message = {
                 "role": "assistant",
-                "content": message.content,
+                "content": message.content or "",
                 "tool_calls": tool_calls,
             }
             if message.reasoning_content is not None:
